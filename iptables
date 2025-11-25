@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# her Oppdaterer vi pakkelisten
+# Oppdater pakkelisten
 echo "Oppdaterer pakkelisten..."
 sudo apt update
 
@@ -8,20 +8,33 @@ sudo apt update
 echo "Installerer iptables og iptables-persistent..."
 sudo apt install -y iptables iptables-persistent
 
-#tillat SSH (port 22) og blokkere alt annet (justeres etter behov)
-echo "Setter opp grunnleggende regler..."
-sudo iptables -F  # Tøm eksisterende regler
-sudo iptables -P INPUT DROP
-sudo iptables -P FORWARD DROP
-sudo iptables -P OUTPUT ACCEPT
+# Tøm eksisterende regler
+iptables -F
+iptables -X
+iptables -Z
 
-# Tillat lokal trafikk
-sudo iptables -A INPUT -i lo -j ACCEPT
+# Sett standard policy til å DROP alt innkommende og videresendt
+iptables -P INPUT DROP
+iptables -P FORWARD DROP
+iptables -P OUTPUT ACCEPT
 
-# Tillat SSH-tilkobling
-sudo iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+# Tillat loopback
+iptables -A INPUT -i lo -j ACCEPT
 
-# Lagre reglene slik at de varer etter restart
+# Tillat etablerte og relaterte tilkoblinger
+iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+# Åpne nødvendige porter for tjenester (juster etter behov)
+# SSH
+iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+# Webserver (HTTP og HTTPS)
+iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+
+# Logging av avviste pakker (valgfritt, for overvåkning)
+iptables -A INPUT -j LOG --log-prefix "IPTables-Drop: "
+
+# Lagre reglene for å sikre at de gjenopprettes ved oppstart
 echo "Lagrer regler..."
 sudo netfilter-persistent save
 
