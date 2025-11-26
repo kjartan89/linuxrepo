@@ -1,0 +1,46 @@
+#!/bin/bash
+
+# Server:navn NåværendeIP NyIP
+servers=(
+  "Tromso-server:10.0.0.25:10.0.0.14"
+  "Web-server:10.0.0.26:10.0.0.15"
+  "Backup-server:10.0.0.22:10.0.0.16"
+  "Harstad-server:10.0.0.17:10.0.0.17"
+  "Bodo-server:10.0.0.24:10.0.0.18"
+)
+
+USER="askild"
+GATEWAY="10.0.0.1"
+DNS1="8.8.8.8"
+DNS2="8.8.4.4"
+
+for entry in "${servers[@]}"; do
+  IFS=":" read -r hostname oldip newip <<< "$entry"
+
+  echo "Oppdaterer $hostname (fra $oldip til $newip)..."
+
+  cat > netplan-temp.yaml <<EOF
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    eth0:
+      dhcp4: no
+      addresses:
+        - $newip/24
+      gateway4: $GATEWAY
+      nameservers:
+        addresses:
+          - $DNS1
+          - $DNS2
+EOF
+
+  scp netplan-temp.yaml $USER@$oldip:/tmp/netplan.yaml
+
+  ssh $USER@$oldip "sudo mv /tmp/netplan.yaml /etc/netplan/01-netcfg.yaml && sudo netplan apply" < /dev/null
+
+  echo "→ Fullført for $hostname. Ny IP: $newip"
+done
+
+rm netplan-temp.yaml
+echo "Alle serverne er oppdatert!"
