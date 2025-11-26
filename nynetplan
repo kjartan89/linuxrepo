@@ -1,0 +1,79 @@
+#!/bin/bash
+
+# Liste over servere (hostname:IP)
+servers=(
+  "Tromso-server:10.0.0.14"
+  "Web-server:10.0.0.15"
+  "Backup-server:10.0.0.16"
+  "Harstad-server:10.0.0.17"
+  "Bodo-server:10.0.0.18"
+)
+
+# SSH bruker
+USER="askild"
+
+# Gateway og DNS
+GATEWAY="10.0.0.1"
+DNS_SERVERS="10.0.0.1 1.1.1.1"
+SEARCH_DOMAINS="example.local internal.lan"
+
+for server in "${servers[@]}"; do
+  IFS=":" read -r hostname ip
+  echo "------------------------------"
+  echo "Oppdaterer $hostname ($ip)..."
+  echo "------------------------------"
+
+  # Finn riktig interface på serveren
+  interface=$(ssh "$USER@$ip" "ip -o link show | awk -F': ' '\$2 !~ /lo/ {print \$2; exit}'")
+
+  if [[ -z "$interface" ]]; then
+    echo "Kunne ikke finne nettverksinterface på $hostname! Hopper over..."
+    continue
+  fi
+
+  echo "Bruker interface: $interface"
+
+  # Lag YAML midlertidig fil
+  cat > temp-netplan.yaml <<EOF
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    $interface:
+      dhcp4: no
+      addresses:
+        - $ip/24
+      routes:
+        - to: default
+          via: $GATEWAY
+      nameservers:
+        search: [${SEARCH_DOMAINS// /, }]
+        addresses: [${DNS_SERVERS// /, }]
+EOF
+
+  # Valider YAML
+  if ! yq e . temp-netplan.yaml > /dev/null 2>&1; then
+    echo "YAML-feil i generert config! Stopper deploy for $hostname!"
+    cat temp-netplan.yaml
+    continue
+  fi
+
+  echo "YAML OK."
+
+  # Overfør fil
+  scp temp-netplan.yaml "$USER@$ip:/tmp/new-netplan.yaml"
+
+  # Sikkerhetskopi + trygg apply
+  ssh "$USER@$ip" "
+    sudo cp /etc/netplan/01-netcfg.yaml /etc/netplan/01-netcfg.yaml.bak 2>/dev/null
+    sudo mv /tmp/new-netplan.yaml /etc/netplan/01-netcfg.yaml
+    echo 'Tester netplan med rollback mulighet...'
+    sudo netplan try --timeout 30
+  "
+
+  echo "Oppdatering ferdig på $hostname."
+
+done
+
+rm temp-netplan.yaml
+echo "Alle servere er behandlet."
